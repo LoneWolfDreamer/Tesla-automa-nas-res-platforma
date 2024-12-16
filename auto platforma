@@ -1,0 +1,128 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+namespace TeslaRentalPlatform
+{
+    // Datubāzes konteksts
+    public class RentalDbContext : DbContext
+    {
+        public DbSet<Car> Cars { get; set; }
+        public DbSet<Customer> Customers { get; set; }
+        public DbSet<Rental> Rentals { get; set; }
+
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+        {
+            optionsBuilder.UseSqlite("Data Source=tesla_rental.db");
+        }
+    }
+
+    // Modeļi
+    public class Car
+    {
+        public int Id { get; set; }
+        public string Model { get; set; }
+        public decimal HourlyRate { get; set; }
+        public decimal KilometerRate { get; set; }
+    }
+
+    public class Customer
+    {
+        public int Id { get; set; }
+        public string FullName { get; set; }
+        public string Email { get; set; }
+    }
+
+    public class Rental
+    {
+        public int Id { get; set; }
+        public int CarId { get; set; }
+        public Car Car { get; set; }
+        public int CustomerId { get; set; }
+        public Customer Customer { get; set; }
+        public DateTime StartTime { get; set; }
+        public DateTime? EndTime { get; set; }
+        public decimal KilometersDriven { get; set; }
+        public decimal TotalCost { get; set; }
+    }
+
+    // API kontrolleris
+    [ApiController]
+    [Route("api/[controller]")]
+    public class RentalsController : ControllerBase
+    {
+        private readonly RentalDbContext _context;
+
+        public RentalsController(RentalDbContext context)
+        {
+            _context = context;
+        }
+
+        [HttpPost("register")] // Klientu reģistrācija
+        public IActionResult RegisterCustomer(Customer customer)
+        {
+            _context.Customers.Add(customer);
+            _context.SaveChanges();
+            return Ok(customer);
+        }
+
+        [HttpPost("rent")] // Auto īres reģistrācija
+        public IActionResult RentCar(int customerId, int carId, DateTime startTime)
+        {
+            var rental = new Rental
+            {
+                CustomerId = customerId,
+                CarId = carId,
+                StartTime = startTime
+            };
+            _context.Rentals.Add(rental);
+            _context.SaveChanges();
+            return Ok(rental);
+        }
+
+        [HttpPost("complete")] // Īres pabeigšana
+        public IActionResult CompleteRental(int rentalId, DateTime endTime, decimal kilometersDriven)
+        {
+            var rental = _context.Rentals.Include(r => r.Car).FirstOrDefault(r => r.Id == rentalId);
+            if (rental == null || rental.EndTime != null) return NotFound();
+
+            rental.EndTime = endTime;
+            rental.KilometersDriven = kilometersDriven;
+            var hours = (decimal)(rental.EndTime - rental.StartTime).Value.TotalHours;
+            rental.TotalCost = (hours * rental.Car.HourlyRate) + (kilometersDriven * rental.Car.KilometerRate);
+
+            _context.SaveChanges();
+            return Ok(new {
+                RentalId = rental.Id,
+                StartTime = rental.StartTime,
+                EndTime = rental.EndTime,
+                Hours = hours,
+                KilometersDriven = kilometersDriven,
+                TotalCost = rental.TotalCost
+            });
+        }
+
+        [HttpGet("cars")] // Pieejamo auto saraksts
+        public IActionResult GetAvailableCars()
+        {
+            var cars = _context.Cars.ToList();
+            return Ok(cars);
+        }
+    }
+
+    // Programmas sākumpunkts
+    public class Program
+    {
+        public static void Main(string[] args)
+        {
+            using (var context = new RentalDbContext())
+            {
+                context.Database.EnsureCreated();
+                Console.WriteLine("Database initialized.");
+            }
+        }
+    }
+}
